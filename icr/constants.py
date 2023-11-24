@@ -5,6 +5,15 @@ Definition of several constants, lists and dictionaries use in the experiments.
 """
 
 import json
+import spacy
+
+
+UNK = "<UNK>" # unknown word
+PAD = "<PAD>" # padding
+BOS = "<BOS>" # beginning of sentence
+EOS = "<EOS>" # end of sentence
+
+spacy_eng = spacy.load("en_core_web_sm")
 
 
 BEFORE_PREFIX = 'before'

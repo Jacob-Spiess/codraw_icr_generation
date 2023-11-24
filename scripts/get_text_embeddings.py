@@ -87,7 +87,7 @@ Model = transformers.models
 
 
 def get_model_and_tokenizer(model_name: str,
-                            device: str) -> Tuple[Model, Model, int]:
+                            device: str):
     """Load and return the pretrained model and tokenizer architectures."""
 
     if 'distilbert' in model_name:
@@ -202,7 +202,7 @@ if __name__ == "__main__":
                         choices=['drawer-teller', 'teller', 'drawer'],
                         help='Which player whose utterances are retrieved.')
     parser.add_argument('-codraw_path',
-                        default='../data/data/CoDraw-master/dataset/CoDraw_1_0.json',
+                        default='../data/CoDraw-master/dataset/CoDraw_1_0.json', #'../data/data/CoDraw-master/dataset/CoDraw_1_0.json'
                         type=str,
                         help='Path to the CoDraw JSON file.')
     parser.add_argument('-output_dir',

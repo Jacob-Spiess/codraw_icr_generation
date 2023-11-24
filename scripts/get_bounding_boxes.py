@@ -11,7 +11,7 @@ import os
 import json
 from PIL import Image
 
-PATH = '../data/data/AbstractScenes_v1.1/Pngs/'
+PATH = '../data/AbstractScenes_v1.1/Pngs/' #'../data/data/AbstractScenes_v1.1/Pngs/'
 PNGS = os.listdir(PATH)
 
 sizes = {}

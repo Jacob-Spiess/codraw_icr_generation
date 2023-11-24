@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import csv
 import h5py
+import pickle 
 import numpy as np
 import pandas as pd
 import torch
@@ -22,21 +23,23 @@ from icr.aux import (get_attributes, get_mentioned_cliparts, get_pose_face,
                      is_thing, parse_id, percent)
 from icr.constants import (AFTER_PREFIX, BEFORE_PREFIX, CLIPSIZES,
                            EMPTY_SCENES, ICR_MAP, LABELS, NA_VALUE, OUT_HEADER,
-                           RESCALING)
+                           RESCALING, BOS, EOS, PAD)
 from icr.structs.dataconf import (HEIGHT, WIDTH, BALLS, CLOUDS, GLASSES, HATS,
                                   TREES, SIZE_GALLERY)
 from icr.structs.game import Game
+#from icr.vocabulary import Vocabulary
 
 
 class CodrawData(Dataset):
     """Build the CoDraw datapoints for one split."""
-    def __init__(self, split: str, clipmap: Dict[str, int],
+    def __init__(self, split: str, clipmap: Dict[str, int], vocabulary, 
                  annotation_path: str, codraw_path: str,
                  token_embeddings_path: str, scenes_path: str,
                  context_size: int, dont_merge_persons: bool,
                  dont_separate_actions: bool, langmodel: str,
                  only_icr_dialogues: bool, only_icr_turns: bool,
-                 reduce_turns_without_actions: bool, score_threshold: float):
+                 reduce_turns_without_actions: bool, 
+                 score_threshold: float):
 
         self.clipmap = clipmap
         self.context_size = context_size
@@ -48,14 +51,17 @@ class CodrawData(Dataset):
         self.split = split
         self.reduce_turns_without_actions = reduce_turns_without_actions
         self.score_threshold = score_threshold
+        self.vocab = vocabulary
 
         codraw = self._load_codraw(codraw_path)
         self.icrs = self._load_icrs(annotation_path, codraw)
         self.games, self.datapoints, = self._construct(codraw)
-        self.scenes = self._load_raw_scenes(scenes_path)
-        self.instructions = self._load_texts(langmodel, token_embeddings_path)
+        #self.scenes = self._load_raw_scenes(scenes_path)
+        self.instructions = self._load_texts(langmodel, "drawer-teller", token_embeddings_path)
+        self.replies = self._load_texts(langmodel, "drawer", token_embeddings_path)
 
-        self.stats = self.compute_stats()
+        
+        #self.stats = self.compute_stats()
 
     def __len__(self) -> int:
         return len(self.datapoints)
@@ -64,25 +70,33 @@ class CodrawData(Dataset):
         game_id, turn = self.datapoints[idx]
         cliplist = self.games[game_id].scenes.gallery
 
-        instruction = self.get_instruction(game_id, turn)
+        instruction_emb = self.get_embedding(game_id, turn, "instruction")
+        drawer_reply_emb = self.get_embedding(game_id, turn, "drawer_reply")
+        teller_reply_tokenized, _, _ = self.get_tokens(game_id, turn, "teller")
+        drawer_reply_tokenized, in_seq, out_seq = self.get_tokens(game_id, turn, "drawer")
         context = self.get_context(game_id, turn)
-        scene_before, scene_after = self.get_scenes(game_id, turn)
-        state_before, state_after = self.build_states(game_id, turn)
-        actions = self.build_actions(state_before, state_after)
+        #scene_before, scene_after = self.get_scenes(game_id, turn)
+        #state_before, state_after = self.build_states(game_id, turn)
+        #actions = self.build_actions(state_before, state_after)
         icr_label = self.get_icr_turn_label(game_id, turn)
         icr_clip_label = self.get_icr_clipart_label(game_id, turn, cliplist)
 
         # append context to the last instruction
-        dialogue = instruction
+        dialogue = instruction_emb
         if self.context_size > 0:
-            dialogue = torch.cat([context, instruction], dim=0)
+            dialogue = torch.cat([context, instruction_emb], dim=0)
 
         data = {'dialogue': dialogue, 'game_id': game_id, 'identifier': idx,
                 'icr_label': icr_label, 'icr_clip_label': icr_clip_label,
-                'scene_after': scene_after, 'scene_before': scene_before,
-                'turn': turn}
+                #'scene_after': scene_after, 'scene_before': scene_before,
+                'turn': turn, 'instruction_emb': instruction_emb, 
+                "drawer_reply_emb": drawer_reply_emb, 
+                "drawer_reply_tokenized": drawer_reply_tokenized,
+                "teller_reply_tokenized": teller_reply_tokenized,
+                "X": in_seq, "y": out_seq
+               }
 
-        return {**data, **state_before, **state_after, **actions}
+        return {**data}#, **state_before, **state_after, **actions}
 
     def _construct(self, codraw: Dict) -> Tuple[Dict, Dict]:
         """Build all datapoints according to specification."""
@@ -111,8 +125,7 @@ class CodrawData(Dataset):
                 datapoints[idx] = (game_id, turn)
         return games, datapoints
 
-    def _filter_actions(self, game: Game, turn: int,
-                        icr_turns: List[int]) -> bool:
+    def _filter_actions(self, game: Game, turn: int, icr_turns: List[int]) -> bool:
         """Reduce the proportion of turns without actions in training data."""
         if (self.reduce_turns_without_actions
                 and game.actions.n_actions_per_turn()[turn] == 0
@@ -152,20 +165,45 @@ class CodrawData(Dataset):
             img_rgb = {int(key): scenes[:] for key, scenes in file.items()}
         return img_rgb
 
-    def _load_texts(self, langmodel: str,
-                    token_embeddings_path: str) -> Dict[int, np.array]:
+    def _load_texts(self, langmodel: str, player: str, token_embeddings_path: str) -> Dict[int, np.array]:
         """Read and store the text embeddings for the instructions."""
-        print(f'load {self.split} text embeddings...')
+        print(f'load {player} {self.split} text embeddings...')
 
-        file = f'{langmodel}_drawer-teller_{self.split}.hdf5'
+        file = f'{langmodel}_{player}_{self.split}.hdf5'
         fname = Path(token_embeddings_path) / langmodel / file
         with h5py.File(fname, 'r') as file:
             embs = {int(key): value[:] for key, value in file.items()}
         return embs
+    
+    def get_embedding(self, game_id: int, turn: int, source: str) -> Tensor:
+        """Return the specified embedding at the current turn."""
+        if source == "instruction":
+            return torch.tensor(self.instructions[game_id][turn])
+        elif source == "drawer_reply":
+            return torch.tensor(self.replies[game_id][turn])
+        else:
+            raise ValueError("Invalid 'source' parameter. Use 'instruction' or 'drawer_reply'.")
+            
+    def get_tokens(self, game_id: int, turn: int, source: str) -> List[int]:
+        """Return the tokenized source utterance."""
+        if source == "drawer":
+            utterance = self.games[game_id].dialogue.turns[turn].drawer
+        elif source == "teller":
+            utterance = self.games[game_id].dialogue.turns[turn].teller
+        else:
+            raise ValueError("Invalid 'source' parameter. Use 'drawer' or 'teller'.")
+        
+        tokenized = [self.vocab.stoi[BOS]]
+        tokenized += self.vocab.numericalize(utterance)
+        tokenized.append(self.vocab.stoi[EOS])
+        
+        padded = torch.tensor(tokenized[:self.vocab.max_token] + [self.vocab.stoi[PAD]] * (self.vocab.max_token - len(tokenized)))
+        
+        i = 1+int(random.random()*(len(tokenized)-1))
+        in_seq, out_seq = tokenized[:i], tokenized[i]
+        in_seq = torch.tensor(in_seq[:self.vocab.max_token] + [self.vocab.stoi[PAD]] * (self.vocab.max_token - len(in_seq)))
 
-    def get_instruction(self, game_id: int, turn: int) -> Tensor:
-        """Return the instruction embedding at current turn."""
-        return torch.tensor(self.instructions[game_id][turn])
+        return padded, in_seq, out_seq
 
     def get_context(self, game_id: int, turn: int) -> Optional[Tensor]:
         """Return the context embedding."""
