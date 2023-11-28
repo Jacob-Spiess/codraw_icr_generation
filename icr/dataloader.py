@@ -19,8 +19,9 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from icr.aux import (get_attributes, get_mentioned_cliparts, get_pose_face,
-                     is_thing, parse_id, percent)
+from icr.aux import (get_attributes, encode_classes, get_mentioned_cliparts, 
+                     get_pose_face, get_question_mood, get_icr_topic,
+                     get_number_cliparts, is_thing, parse_id, percent)
 from icr.constants import (AFTER_PREFIX, BEFORE_PREFIX, CLIPSIZES,
                            EMPTY_SCENES, ICR_MAP, LABELS, NA_VALUE, OUT_HEADER,
                            RESCALING, BOS, EOS, PAD)
@@ -54,7 +55,7 @@ class CodrawData(Dataset):
         self.vocab = vocabulary
 
         codraw = self._load_codraw(codraw_path)
-        self.icrs = self._load_icrs(annotation_path, codraw)
+        self.icrs, self.question_moods, self.num_cliparts, self.topics = self._load_icrs(annotation_path, codraw)
         self.games, self.datapoints, = self._construct(codraw)
         #self.scenes = self._load_raw_scenes(scenes_path)
         self.instructions = self._load_texts(langmodel, "drawer-teller", token_embeddings_path)
@@ -80,6 +81,9 @@ class CodrawData(Dataset):
         #actions = self.build_actions(state_before, state_after)
         icr_label = self.get_icr_turn_label(game_id, turn)
         icr_clip_label = self.get_icr_clipart_label(game_id, turn, cliplist)
+        icr_mood = self.question_moods[game_id][turn][:]
+        icr_num_clip = self.num_cliparts[game_id][turn][:]
+        icr_topic = self.topics[game_id][turn][:]
 
         # append context to the last instruction
         dialogue = instruction_emb
@@ -88,6 +92,7 @@ class CodrawData(Dataset):
 
         data = {'dialogue': dialogue, 'game_id': game_id, 'identifier': idx,
                 'icr_label': icr_label, 'icr_clip_label': icr_clip_label,
+                'icr_topic': icr_topic, 'icr_mood': icr_mood, 'icr_num_clip': icr_num_clip,
                 #'scene_after': scene_after, 'scene_before': scene_before,
                 'turn': turn, 'instruction_emb': instruction_emb, 
                 "drawer_reply_emb": drawer_reply_emb, 
@@ -138,14 +143,24 @@ class CodrawData(Dataset):
     def _load_icrs(self, path: str, codraw: Dict) -> Dict[int, Dict]:
         """Load annotation and return dictionary of iCR turns and cliparts."""
         annot = pd.read_csv(Path(path), sep='\t')
-        icrs = {name: {} for name in codraw}
+        annot.columns = [col.replace('size', 'size_') for col in annot.columns] #to access the column by name
+        annot_clipart = encode_classes(annot['clipart'])
+        annot_mood= encode_classes(annot['mood'])
+        annot = pd.concat([annot, annot_clipart, annot_mood], axis=1)
+
+        icr_cliparts = {name: {} for name in codraw}
+        question_moods = {name: {} for name in codraw}
+        num_cliparts = {name: {} for name in codraw}
+        topics = {name: {} for name in codraw}
         for _, row in annot.iterrows():
             if self.split not in row.game_name:
                 continue
             game_id = parse_id(row.game_name)
-            mentioned = get_mentioned_cliparts(row)
-            icrs[game_id][row.turn] = mentioned
-        return icrs
+            icr_cliparts[game_id][row.turn] =  get_mentioned_cliparts(row)
+            question_moods[game_id][row.turn] = get_question_mood(row)
+            num_cliparts[game_id][row.turn] = get_number_cliparts(row)
+            topics[game_id][row.turn] = get_icr_topic(row)
+        return icr_cliparts, question_moods, num_cliparts, topics
 
     def _load_codraw(self, path: str) -> Dict[int, Dict]:
         """Read CoDraw JSON file and return dictionary with the split games."""
@@ -273,7 +288,7 @@ class CodrawData(Dataset):
                 mentions += GLASSES
             if 'tree group' in mentions:
                 mentions += TREES
-        return torch.tensor([1 if clip in mentions else 0 for clip in gallery])
+        return torch.tensor([1 if clip in mentions else 0 for clip in gallery], dtype=torch.float32)
 
     def _get_cliparts(self, game_id: int, turn: int) -> List[Any]:
         """Return a list of cliparts in the current scene."""

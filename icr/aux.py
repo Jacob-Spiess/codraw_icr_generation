@@ -18,6 +18,7 @@ import torch
 from pytorch_lightning.loggers import Logger
 from torch import Tensor
 from torch.utils.data import Dataset
+from sklearn.preprocessing import MultiLabelBinarizer
 
 from icr import constants
 from icr.structs.dataconf import file2obj
@@ -131,11 +132,42 @@ def log_final_state(logger: Logger, log_dir: Path, ckpt_name: str) -> None:
     logger.experiment.log_model('best-model.ckpt', ckpt_name)
 
 
+def encode_classes(column):
+    """One hot encode a specific column in the annotation table"""
+    column = column.fillna(column.name+"_nan")
+
+    categories_list = [entry.split(',') for entry in column]
+
+    mlb = MultiLabelBinarizer()
+    encoded_data = mlb.fit_transform(categories_list)
+    encoded_df = pd.DataFrame(encoded_data, columns=mlb.classes_)
+
+    encoded_df.columns = [col.replace(' ', '_') for col in encoded_df.columns]
+    encoded_df.columns = [col.replace('-', '_') for col in encoded_df.columns]
+
+    return encoded_df
+
+
 def get_mentioned_cliparts(row: pd.Series) -> List[str]:
     """Make list of mentioned cliparts in an iCR."""
     mentioned = [row.clipart_1, row.clipart_2, row.clipart_3, row.clipart_4,
                  row.clipart_5]
     return [clip.replace('_', ' ') for clip in mentioned if not pd.isna(clip)]
+
+
+def get_question_mood(row: pd.Series) -> List[str]:
+    """Make list of one hot encoded mood in an iCR."""
+    return torch.Tensor([row.mood_nan, row.alternative_question, row.declarative, row.imperative, row.other, row.polar_question, row.wh_question])
+
+
+def get_icr_topic(row: pd.Series) -> List[str]:
+    """Make list of one hot encoded topic of an iCR."""
+    return torch.Tensor([row.position, row.size_, row.direction, row.relation_to_other_cliparts, row.disambig_object, row.disambig_person])
+
+
+def get_number_cliparts(row: pd.Series) -> List[str]:
+    """Make list of one hot number of talked about cliparts in an iCR."""
+    return torch.Tensor([row.clipart_nan, row.two, row.many, row.one, row.unknown])
 
 
 def parse_id(name: str) -> int:

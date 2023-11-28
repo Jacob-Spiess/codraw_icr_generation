@@ -31,7 +31,7 @@ print('\n---------- Running iCR experiment ----------\n')
 
 vocab = Vocabulary(config["data"]["codraw_path"])
 dm = CoDrawDataModule(data_config=config["data"], batch_size=config["generation"]["batch_size"], vocabulary=vocab)
-
+print(dm.test_dataloader().dataset.games[8829].print_steps())
 model = ICRModel1(vocab, config["model"])
 
 #model = iCRGeneration(config["generation"], config["model"])

@@ -52,7 +52,19 @@ class ICRModel(nn.Module):
 
         return {**icr_outputs}
     
+class ProbDecoder(nn.Module):
+    """A classifier for the probability of one event (as logit)."""
+    def __init__(self, d_model: int, hidden_dim: int, output_dim: int, dropout: float):
+        super().__init__()
+        self.decoder = nn.Sequential(
+            nn.LeakyReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(d_model, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, output_dim))
 
+    def forward(self, inputs: Tensor) -> Tensor:
+        return self.decoder(inputs)
     
 class TextEncoder(nn.Module):
     """Encoding tokenized text input"""

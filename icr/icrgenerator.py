@@ -13,14 +13,14 @@ from torch import nn, Tensor
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from positional_encodings.torch_encodings import PositionalEncoding1D
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 import torch.nn.functional as F
 
 from icr.aux import mask_pads #filter_checkpoint
 from icr.constants import REDUCTION, SPLITS
 from icr.evaluator import Metrics, Outputs
 from icr import constants
-from icr.models import TopicModel, ICRModel, TextEncoder, TextDecoder, EmbeddingCompresser
+from icr.models import TopicModel, ICRModel, TextEncoder, TextDecoder, EmbeddingCompresser, ProbDecoder
 from icr.components import (
     ActionsMaker, CrossEncoder, iCRClipDecoder, iCRTurnDecoder,
     SceneEncoder, SelfCrossEncoder, StateEmbedding, LearnableLossWeights)
@@ -223,78 +223,121 @@ class ICRModel1(pl.LightningModule):
         vocab_size = len(vocab)
         self.vocab_size = vocab_size
         max_length = vocab.max_token
-        
-        self.loss_fn = CrossEntropyLoss()
-        
-        # Saving hyperparameters
+        self.vocab = vocab
+
+        self.loss_cross = CrossEntropyLoss()
+        self.loss_bce = BCEWithLogitsLoss()
+
         self.save_hyperparameters()
-        #d_model: int, hidden_dim: int, output_dim: int, num_layers: int, dropout: float):
+
         self.text_encoder = TextEncoder(vocab_size, config["hidden_dim"], config["hidden_dim"], config["dropout"])
         self.dialogue_encoder = EmbeddingCompresser(config["hidden_dim"])
         self.decoder = TextDecoder(config["hidden_dim"], config["hidden_dim"], vocab_size, config["nlayers"], config["dropout"])
+        self.topic_decoder = ProbDecoder(config["hidden_dim"], config["hidden_dim"], 6 , config["dropout"])
+        self.num_clip_decoder = ProbDecoder(config["hidden_dim"], config["hidden_dim"], 5, config["dropout"])
+        self.mood_decoder = ProbDecoder(config["hidden_dim"], config["hidden_dim"], 7, config["dropout"])
+        self.clipart_decoder = ProbDecoder(config["hidden_dim"], config["hidden_dim"], 28, config["dropout"])
 
-    def forward(self, input_sequence, dialogue):
+    def forward(self, input_sequence, dialogue, clip, mood, num_clip, topic):
         
         features = self.dialogue_encoder(dialogue)
-        features = features.unsqueeze(1)       
-        
+        #features = features.unsqueeze(1)       
         embeds = self.text_encoder(input_sequence)
         
-        encoding = torch.cat((features, embeds), dim=1)
+        outputs_c = self.clipart_decoder(features)
+        outputs_m = self.mood_decoder(features)
+        outputs_n = self.num_clip_decoder(features)
+        outputs_t = self.topic_decoder(features)
 
+
+        encoding = torch.cat((features.unsqueeze(1), embeds), dim=1)
         outputs = self.decoder(encoding)
         
-        return outputs
+        return outputs, outputs_c, outputs_m, outputs_n, outputs_t
     
     def training_step(self, batch, batch_idx):
         drawer_sequence = batch["drawer_reply_tokenized"][:, :-1]
         targets =  batch["drawer_reply_tokenized"]#[:,1: ] 
         dialogue = batch["dialogue"]
+        clip = batch["icr_clip_label"]
+        mood = batch["icr_mood"]
+        num_clip = batch["icr_num_clip"]
+        topic = batch["icr_topic"]
         
-        outputs = self(drawer_sequence, dialogue)
+        outputs, c, m, n, t = self(drawer_sequence, dialogue, clip, mood, num_clip, topic)
         
-        loss = self.loss_fn(outputs.view(-1,self.vocab_size), targets.reshape(-1))
-        #loss = self.calculate_loss(outputs, targets)
+        loss = self.loss_cross(outputs.view(-1,self.vocab_size), targets.reshape(-1))
+        loss_c = self.loss_bce(c, clip.float())
+        loss_m = self.loss_bce(m, mood.float())
+        loss_n = self.loss_cross(n, num_clip.argmax(dim=1))
+        loss_t = self.loss_bce(t, topic.float())
+
         self.log('train_loss', loss)
-        return loss
+        self.log('train_loss_c', loss_c)
+        self.log('train_loss_m', loss_m)
+        self.log('train_loss_n', loss_n)
+        self.log('train_loss_t', loss_t)
+        return loss + loss_c + loss_m + loss_n + loss_t
 
     def validation_step(self, batch, batch_idx):
         drawer_sequence = batch["drawer_reply_tokenized"][:, :-1]
         targets =  batch["drawer_reply_tokenized"]#[:,1: ]  
         dialogue = batch["dialogue"]
+        clip = batch["icr_clip_label"]
+        mood = batch["icr_mood"]
+        num_clip = batch["icr_num_clip"]
+        topic = batch["icr_topic"]
 
-        outputs = self(drawer_sequence, dialogue)
+        outputs, c, m, n, t = self(drawer_sequence, dialogue, clip, mood, num_clip, topic)
 
         targets_loss = targets.reshape(-1)
-
         outputs_loss = outputs.view(-1, outputs.size(-1))
-
-        loss = self.loss_fn(outputs_loss, targets_loss)
-        
-        #loss = self.calculate_loss(outputs, targets)
+        loss = self.loss_cross(outputs_loss, targets_loss)        
+        # mask = tarets_loss != 0 
+        # acc = (outputs_loss[mask].argmax(dim=1) == targets_loss[mask]).float().mean().item()
         acc = (outputs_loss.argmax(dim=1) == targets_loss).sum().item() / len(targets_loss)
         
+        loss_c = self.loss_bce(c, clip.float())
+        loss_m = self.loss_bce(m, mood.float())
+        loss_n = self.loss_cross(n, num_clip.argmax(dim=1))
+        loss_t = self.loss_bce(t, topic.float())
+
         self.log('val_acc', acc, prog_bar=True)
         self.log('val_loss', loss)
-        return loss
+        self.log('val_loss_c', loss_c)
+        self.log('val_loss_m', loss_m)
+        self.log('val_loss_n', loss_n)
+        self.log('val_loss_t', loss_t)
+        return loss + loss_c + loss_m + loss_n + loss_t
     
     def test_step(self, batch, batch_idx):
         drawer_sequence = batch["drawer_reply_tokenized"][:, :-1]
-        targets =  batch["drawer_reply_tokenized"]#[:,1: ] 
+        targets =  batch["drawer_reply_tokenized"] 
         dialogue = batch["dialogue"]
+        clip = batch["icr_clip_label"]
+        mood = batch["icr_mood"]
+        num_clip = batch["icr_num_clip"]
+        topic = batch["icr_topic"]
 
-        outputs = self(drawer_sequence, dialogue)
+        outputs, c, m, n, t = self(drawer_sequence, dialogue, clip, mood, num_clip, topic)
         
         targets=targets.reshape(-1)
         outputs=outputs.view(-1, outputs.size(-1))
-        
-        loss = self.loss_fn(outputs, targets)
-        #loss = self.calculate_loss(outputs, targets)
+        loss = self.loss_cross(outputs, targets)
         acc = (outputs.argmax(dim=1) == targets).sum().item() / len(targets)
         
-        self.log('val_loss', loss)
-        self.log('val_acc', acc, prog_bar=True)
-        return loss
+        loss_c = self.loss_bce(c, clip.float())
+        loss_m = self.loss_bce(m, mood.float())
+        loss_n = self.loss_cross(n, num_clip.argmax(dim=1))
+        loss_t = self.loss_bce(t, topic.float())
+
+        self.log('test_loss', loss)
+        self.log('test_acc', acc, prog_bar=True)
+        self.log('test_loss_c', loss_c)
+        self.log('test_loss_m', loss_m)
+        self.log('test_loss_n', loss_n)
+        self.log('test_loss_t', loss_t)
+        return loss + loss_c + loss_m + loss_n + loss_t
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=0.001)
@@ -309,3 +352,27 @@ class ICRModel1(pl.LightningModule):
 
         loss = nn.CrossEntropyLoss(ignore_index=0)  # Assuming 0 is the index for padding
         return loss(outputs_2d, targets_1d)
+
+    def reply(self, dialogue, vocab, max_len = 20, hidden=None):
+        word = torch.tensor(self.vocab.stoi[BOS]).view(1,-1)
+        features = self.dialogue_encoder(dialogue)
+        features = features.unsqueeze(1)
+
+        embeds = self.text_encoder(word)
+        encoding = torch.cat((features, embeds), dim=1)
+
+        reply = []
+
+        for _ in range(max_len):
+            x, hidden = self.decoder.decoder1(encoding, hidden)
+            output = self.decoder.decoder2(x).view(encoding.size(0),-1)
+
+            prediction_index = output.argmax(dim=1)
+            reply.append(vocab.itos[prediction_index.item()])
+
+            if vocab.itos[prediction_index.item()] == EOS:
+                break
+            else:
+                features = self.embedding(prediction_index.unsqueeze(0))
+
+        return reply
