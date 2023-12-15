@@ -47,10 +47,21 @@ config = {
         "d_model": 256,
         "dropout": 0.2,
         "full_trf_encoder": True,
-        "hidden_dim": 256,
+        "hidden_dim": 1024,
         "hidden_dim_trf": 2048,
+        "dialogue_embedding_size": 1024,
+        "word_embedding_size": 512,
+        "topic_classes": 6,
+        "num_clip_classes": 5,
+        "mood_classes": 7,
+        "clipart_classes": 28,
         "nheads": 16,
         "nlayers": 3,
+        "lr": 0.0001,
+        "use_num_clip_decoder": False,
+        "use_clipart_decoder": False,
+        "use_topic_decoder": False,
+        "use_mood_decoder": False,
         "use_scene_before": True,
         "use_scene_after": True,
         "no_instruction": True,
@@ -64,9 +75,9 @@ config = {
     "training": {
         "n_grad_accumulate": 1,
         "clip": 1,
-        "device": 'cpu',   #['cpu', 'gpu']
+        "device": 'gpu',   #['cpu', 'gpu']
         "gpu": 1,
-        "n_epochs": 10,
+        "n_epochs": 30,
         "n_reload_data": 1,
         "random_seed": 1234
     }

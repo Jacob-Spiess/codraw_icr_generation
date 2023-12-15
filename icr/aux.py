@@ -40,6 +40,34 @@ def split_config(params: Namespace) -> List[Namespace]:
     return data_config, comet_config, train_config, model_config, exp_config
 
 
+def split_batch(batch): 
+    """Split batch data into inputs for the encoder"""
+    drawer_sequence = batch["drawer_reply_tokenized"][:, :-1]
+    targets =  batch["drawer_reply_tokenized"][:,1: ] 
+    dialogue = batch["dialogue"]
+    clip = batch["icr_clip_label"]
+    mood = batch["icr_mood"]
+    num_clip = batch["icr_num_clip"]
+    topic = batch["icr_topic"]
+    return drawer_sequence, targets, dialogue, clip, mood, num_clip, topic
+
+def compute_accuracy(outputs, targets, pad_idx):
+    """Calculate accuracy for the predicted tokens matching the target, while ignoring the padding"""
+    #with padding:
+    #acc = (outputs.view(-1, outputs.size(-1)).argmax(dim=1) == targets.reshape(-1)).sum().item() / len(targets.reshape(-1))
+    
+    outputs_flat = outputs.view(-1, outputs.size(-1))
+    targets_flat = targets.reshape(-1)
+    predictions = outputs_flat.argmax(dim=1)
+
+    non_pad_mask = targets_flat != pad_idx
+
+    correct_non_pad = (predictions == targets_flat) & non_pad_mask
+    accuracy = correct_non_pad.sum().item() / non_pad_mask.sum().item()
+
+    return accuracy
+
+
 def check_params_consistency(params):
     """Raises error if invalid combinations of hyperparameters is detected."""
 
@@ -229,6 +257,11 @@ def define_monitored_metric(params: Namespace) -> Tuple[str, str]:
 def percent(numerator: float, denominator: float) -> float:
     """Return the percentage."""
     return 100 * numerator / denominator
+
+
+def list_avg(lst):
+    """Return the average of a list."""
+    return sum(lst)/len(lst)
 
 
 def filter_checkpoint(state_dict: OrderedDict) -> Dict[str, Tensor]:

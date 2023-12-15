@@ -209,7 +209,7 @@ class CodrawData(Dataset):
             raise ValueError("Invalid 'source' parameter. Use 'drawer' or 'teller'.")
         
         tokenized = [self.vocab.stoi[BOS]]
-        tokenized += self.vocab.numericalize(utterance)
+        tokenized += self.vocab.numericalize(utterance.split())
         tokenized.append(self.vocab.stoi[EOS])
         
         padded = torch.tensor(tokenized[:self.vocab.max_token] + [self.vocab.stoi[PAD]] * (self.vocab.max_token - len(tokenized)))

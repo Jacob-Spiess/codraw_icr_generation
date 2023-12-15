@@ -11,52 +11,13 @@ from torch import nn, Tensor
 import torch.nn.functional as F
 
 from icr import constants
-from icr.aux import mask_pads
 
-from icr.components import (
-    ActionsMaker, CrossEncoder, iCRClipDecoder, iCRTurnDecoder,
-    SceneEncoder, SelfCrossEncoder, StateEmbedding, iCRDecoder)
-
-
-class TopicModel(nn.Module):
-    
-    def __init__(self, model_config = Dict[str, int]):
-        super().__init__()
-
-        self.icr_clip_decoder = iCRClipDecoder(
-                d_model=model_config["d_model"], hidden_dim=model_config["hidden_dim"], dropout=model_config["dropout"])
-        self.labels = self.icr_clip_decoder.labels
-    
-    def forward(self, inputs: Dict[str, Tensor],
-                labels: Dict[str, Tensor]) -> Dict[str, Tensor]:
-
-        icr_outputs = {}
-        icr_outputs = self.icr_clip_decoder(inputs)
-
-        return {**icr_outputs}
-
-    
-class ICRModel(nn.Module):
-    
-    def __init__(self, model_config = Dict[str, int]):
-        super().__init__()
-
-        self.icr_decoder = iCRDecoder(
-                d_model=model_config["d_model"], hidden_dim=model_config["hidden_dim"], 
-                output_dim = model_config["nlayers"], nlayers = model_config["d_model"], dropout=model_config["dropout"])
-        self.labels = self.icr_decoder.labels
-    
-    def forward(self, inputs: Dict[str, Tensor], labels: Dict[str, Tensor]) -> Dict[str, Tensor]:
-        icr_outputs = {}
-        icr_outputs = self.icr_decoder(inputs)
-
-        return {**icr_outputs}
     
 class ProbDecoder(nn.Module):
     """A classifier for the probability of one event (as logit)."""
     def __init__(self, d_model: int, hidden_dim: int, output_dim: int, dropout: float):
         super().__init__()
-        self.decoder = nn.Sequential(
+        self.propdecoder = nn.Sequential(
             nn.LeakyReLU(),
             nn.Dropout(p=dropout),
             nn.Linear(d_model, hidden_dim),
@@ -64,23 +25,25 @@ class ProbDecoder(nn.Module):
             nn.Linear(hidden_dim, output_dim))
 
     def forward(self, inputs: Tensor) -> Tensor:
-        return self.decoder(inputs)
+        return self.propdecoder(inputs)
+    
     
 class TextEncoder(nn.Module):
     """Encoding tokenized text input"""
     def __init__(self, d_model: int, hidden_dim: int, output_dim: int, dropout: float):
         super().__init__()
         
-        self.seqencoder1 = nn.Embedding(d_model, hidden_dim, padding_idx=0)
-        self.seqencoder2 = nn.Dropout(p=dropout)
-        self.seqencoder3 = nn.Linear(hidden_dim, output_dim) 
+        self.emb = nn.Embedding(d_model, hidden_dim, padding_idx=0)
+        self.fc = nn.Linear(hidden_dim, output_dim) 
+        self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, inputs: Tensor) -> Tensor:
         
-        se1_out = F.relu(self.seqencoder1(inputs))
-        se2_out = self.seqencoder2(se1_out)
-        se3_out = self.seqencoder3(se2_out)
-        return se3_out
+        x = F.relu(self.emb(inputs))
+        x = self.dropout(x)
+        ouput = self.fc(x)
+        return ouput
+    
     
 class EmbeddingCompresser(nn.Module):
     """Compressing loaded text embeddings"""    
@@ -93,21 +56,25 @@ class EmbeddingCompresser(nn.Module):
         
         return self.compresser(torch.flatten(inputs,1,2))
 
+    
 class TextDecoder(nn.Module):
     """Decoding into probabilities over the vocabulary"""
     def __init__(self, d_model: int, hidden_dim: int, output_dim: int, num_layers: int, dropout: float):
         super().__init__()
         
-        self.decoder1 = nn.LSTM(d_model, hidden_dim, num_layers, dropout=dropout, batch_first=True, bias=True)
-        self.decoder2 = nn.Linear(hidden_dim, output_dim)
+        self.num_layers = num_layers
+        
+        self.lstm = nn.LSTM(d_model, hidden_dim, num_layers, dropout=dropout, batch_first=True, bias=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, embeddings: Tensor, features: Tensor) -> Tensor:
         
-        decoder1_out, _ = self.decoder1(inputs)
-        outputs = self.decoder2(self.dropout(decoder1_out))
-        #decoder2_out = self.decoder2(F.relu(decoder1_out[:,-1,:)
-        #outputs = F.softmax(decoder2_out, dim = 1)
+        h0 = features.repeat(self.num_layers, 1, 1)  #(num_layers, batch_size, hidden_size)
+        c0 = torch.zeros_like(h0)
+        
+        decoder1_out, _ = self.lstm(embeddings, (h0, c0))
+        outputs = self.fc(self.dropout(decoder1_out))
         
         return outputs  
     
