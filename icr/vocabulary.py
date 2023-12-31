@@ -6,7 +6,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from icr import aux
-from icr.constants import UNK, PAD, BOS, EOS, spacy_eng
+from icr.constants import UNK, PAD, BOS, EOS#, spacy_eng
 
 
 
@@ -28,9 +28,9 @@ class Vocabulary:
     def __len__(self): 
         return len(self.itos)
     
-    @staticmethod
-    def tokenize(text):
-        return [token.text.lower() for token in spacy_eng.tokenizer(text)] #Vocabulary.
+    #@staticmethod
+    #def tokenize(text):
+    #    return [token.text.lower() for token in spacy_eng.tokenizer(text)] #Vocabulary.
     
     def build_vocabulary(self, dialogues):
         frequencies = Counter()

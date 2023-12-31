@@ -13,7 +13,7 @@ PAD = "<PAD>" # padding
 BOS = "<BOS>" # beginning of sentence
 EOS = "<EOS>" # end of sentence
 
-spacy_eng = spacy.load("en_core_web_sm")
+#spacy_eng = spacy.load("en_core_web_sm")
 
 
 BEFORE_PREFIX = 'before'

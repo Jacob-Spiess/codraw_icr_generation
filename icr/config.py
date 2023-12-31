@@ -51,6 +51,8 @@ config = {
         "hidden_dim_trf": 2048,
         "dialogue_embedding_size": 1024,
         "word_embedding_size": 512,
+        "decoder_size": 1024,
+        "attention_size": 512,
         "topic_classes": 6,
         "num_clip_classes": 5,
         "mood_classes": 7,
@@ -58,10 +60,10 @@ config = {
         "nheads": 16,
         "nlayers": 3,
         "lr": 0.0001,
-        "use_num_clip_decoder": False,
-        "use_clipart_decoder": False,
-        "use_topic_decoder": False,
-        "use_mood_decoder": False,
+        "use_num_clip_decoder": True,
+        "use_clipart_decoder": True,
+        "use_topic_decoder": True,
+        "use_mood_decoder": True,
         "use_scene_before": True,
         "use_scene_after": True,
         "no_instruction": True,
@@ -75,7 +77,7 @@ config = {
     "training": {
         "n_grad_accumulate": 1,
         "clip": 1,
-        "device": 'gpu',   #['cpu', 'gpu']
+        "device": 'cpu',   #['cpu', 'gpu']
         "gpu": 1,
         "n_epochs": 30,
         "n_reload_data": 1,

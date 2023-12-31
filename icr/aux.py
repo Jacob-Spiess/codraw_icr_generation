@@ -24,6 +24,49 @@ from icr import constants
 from icr.structs.dataconf import file2obj
 
 
+def write_model_outputs_to_files(model, val_data, output_paths):
+    """
+    Writes the outputs of the model to specified files.
+
+    :param model: The model used for generating replies.
+    :param val_data: Iterable DataLoader containing the validation data.
+    :param output_paths: Dictionary containing paths for each output file.
+    """
+    # Open all files at once
+    with open(output_paths["reply"], "w") as file1, \
+         open(output_paths["outputs"], "w") as file2, \
+         open(output_paths["n"], "w") as file3, \
+         open(output_paths["c"], "w") as file4, \
+         open(output_paths["t"], "w") as file5, \
+         open(output_paths["m"], "w") as file6:
+        
+        outputs = []
+        n = []
+        c = []
+        t = []
+        m = []
+        
+        for batch_idx, batch in enumerate(val_data):
+            for dialogue in batch["dialogue"]:
+                dialogue = dialogue.unsqueeze(0)
+                predictions = model.reply(dialogue)
+
+                # Assuming model.reply(dialogue) returns a tuple of five elements
+                file1.write(' '.join(predictions[0][:-1]) + '\n')
+                outputs.append(predictions[1].tolist())
+                n.append(predictions[2].tolist())
+                c.append(predictions[3].tolist())
+                t.append(predictions[4].tolist())
+                m.append(predictions[5].tolist())
+
+        json.dump(outputs, file2)
+        json.dump(n, file3)
+        json.dump(c, file4)
+        json.dump(t, file5)
+        json.dump(m, file6)
+
+
+
 def filter_config(params: Namespace, keys: list) -> Namespace:
     """Filter the parameters by keys and return a Namespace with the subset."""
     subset = {key: value for key, value in vars(params).items() if key in keys}
@@ -51,7 +94,7 @@ def split_batch(batch):
     topic = batch["icr_topic"]
     return drawer_sequence, targets, dialogue, clip, mood, num_clip, topic
 
-def compute_accuracy(outputs, targets, pad_idx):
+def compute_accuracy_text(outputs, targets, pad_idx):
     """Calculate accuracy for the predicted tokens matching the target, while ignoring the padding"""
     #with padding:
     #acc = (outputs.view(-1, outputs.size(-1)).argmax(dim=1) == targets.reshape(-1)).sum().item() / len(targets.reshape(-1))
@@ -66,6 +109,21 @@ def compute_accuracy(outputs, targets, pad_idx):
     accuracy = correct_non_pad.sum().item() / non_pad_mask.sum().item()
 
     return accuracy
+
+
+def compute_accuracy_single_label(preds, y):
+    preds = torch.argmax(preds, dim=1)
+    correct = (preds == y).float()
+    acc = correct.sum() / len(correct)
+    return acc
+
+
+def compute_accuracy_multi_label(preds, y):
+    # Threshold predictions at 0.5
+    preds = preds > 0.5
+    correct = (preds == y).float()
+    acc = correct.sum() / (correct.numel())
+    return acc
 
 
 def check_params_consistency(params):
