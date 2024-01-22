@@ -1,5 +1,5 @@
 from typing import Dict, Tuple, List
-import spacy
+#import spacy
 import json
 from collections import Counter
 from pathlib import Path

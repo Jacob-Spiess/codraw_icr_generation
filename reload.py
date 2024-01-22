@@ -22,7 +22,8 @@ from icr.config import config
 from icr.vocabulary import Vocabulary
 from icr.dataloader import CodrawData
 from icr.datamodel import CoDrawDataModule
-from icr.icrgenerator import ICRModel1
+from icr.icrgenerator import ICRModel, ICRModel1
+from icr.aux import write_model_outputs_to_files
 
 
 
@@ -30,14 +31,20 @@ print('\n---------- Running iCR experiment ----------\n')
 
 #pl.seed_everything(config["training"]["random_seed"])
 #torch.use_deterministic_algorithms(True, warn_only=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 vocab = Vocabulary(config["data"]["codraw_path"])
 dm = CoDrawDataModule(data_config=config["data"], batch_size=config["generation"]["batch_size"], vocabulary=vocab)
 
-CKPT_PATH = "./outputs/lightning_logs/version_18/checkpoints/epoch=13-step=3066.ckpt"
+#'comet-logs/codraw-icr-generation/7cc309e780ac4149bd6a514a231f0e2a/checkpoints/epoch=18-step=4161.ckpt' #best Transformer
+#'comet-logs/codraw-icr-generation/a8fbfbb69dbe47efb065d6e01445572b/checkpoints/epoch=39-step=8760.ckpt' #best LSTM secret_cougar_1115
+#'comet-logs/codraw-icr-generation/468af100307a488bb9193aed3d1f1896/checkpoints/epoch=14-step=3285.ckpt' #best Attention diverse_stable_1301
+CKPT_PATH = 'comet-logs/codraw-icr-generation/969472473b404df49daa89be78ed0106/checkpoints/epoch=9-step=2190.ckpt'
+#CKPT_PATH = 'outputs/lightning_logs/version_85/checkpoints/epoch=3-step=657.ckpt'
 #CKPT_PATH = './outputs/lightning_logs/version_16/checkpoints/epoch=15-step=3504.ckpt'
 
 model = ICRModel1.load_from_checkpoint(CKPT_PATH)
+model.to(device)
 
 #print(model.learning_rate)
 # prints the learning_rate you used in this checkpoint
@@ -62,10 +69,15 @@ trainer = pl.Trainer(
 trainer.test(model, datamodule=dm)
 
 
+print('\n---------- Start evaluating ----------\n')
+model.eval()
+torch.no_grad()
+
 val_data = dm.val_dataloader()
-output_file = "predictions.txt"
+
 target_file = "targets.txt"
 
+#can change based on vocabulary settings
 if os.path.isfile(config["paths"]["outputs_path"]+target_file) != True:
     with open(config["paths"]["outputs_path"]+target_file, "w") as file:
         for batch_idx, batch in enumerate(val_data):
@@ -76,17 +88,21 @@ if os.path.isfile(config["paths"]["outputs_path"]+target_file) != True:
                     if vocab.itos[i.item()] == EOS:
                         break
                 file.write(' '.join(x_target[1:-1]) + '\n')
-            
-with open(config["paths"]["outputs_path"]+output_file, "w") as file:
-    for batch_idx, batch in enumerate(val_data):
-        for d in batch["dialogue"]:
-            dialogue = d.unsqueeze(0)
-            predictions = model.reply(dialogue)
-            file.write(' '.join(predictions[:-1]) + '\n')
+
+output_paths = {
+    "reply": config["paths"]["outputs_path"]+"icr_predictions.txt",
+    "outputs": config["paths"]["outputs_path"]+"out_predictions.txt",
+    "n": config["paths"]["outputs_path"]+"number_predictions.txt",
+    "c": config["paths"]["outputs_path"]+"clipart_predictions.txt",
+    "t": config["paths"]["outputs_path"]+"topic_predictions.txt",
+    "m": config["paths"]["outputs_path"]+"mood_predictions.txt",
+}
+
+write_model_outputs_to_files(model, val_data, output_paths, use_sampling=False, top_k=5, top_p=0.95, temperature = 1)
 
 print("Outputs safed!\n")
 print("First 5 Outputs:\n")
 # Print only the first 5 outputs from the file
-with open(config["paths"]["outputs_path"]+output_file, "r") as file:
+with open(output_paths["reply"], "r") as file:
     lines = [line.strip() for line in file.readlines()]
     print(lines[0:5])

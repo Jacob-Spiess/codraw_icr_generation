@@ -5,7 +5,7 @@ Definition of several constants, lists and dictionaries use in the experiments.
 """
 
 import json
-import spacy
+#import spacy
 
 
 UNK = "<UNK>" # unknown word
@@ -15,6 +15,11 @@ EOS = "<EOS>" # end of sentence
 
 #spacy_eng = spacy.load("en_core_web_sm")
 
+NUM_WEIGHTS = [4.7361, 0.0127, 0.0560, 0.0070, 0.1882]
+CLIP_WEIGHTS = [0.5277, 0.9288, 0.8468, 0.4276, 0.4429, 0.4843, 0.4627, 0.1154, 0.1154, 0.1154, 0.1154, 0.1154, 0.1127, 0.1127, 
+                0.1127, 0.1127, 0.1127, 0.6560, 0.6414, 3.2800, 2.8792, 2.5912, 3.1600, 3.5017, 1.5243, 1.5516, 1.4640, 1.4892]
+TOPIC_WEIGHTS = [0.6686, 0.9240, 0.8137, 0.6000, 2.2707, 0.7231]
+MOOD_WEIGHTS = [6.6093, 0.0126, 0.0646, 0.2510, 0.0480, 0.0070, 0.0075]
 
 BEFORE_PREFIX = 'before'
 

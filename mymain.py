@@ -1,28 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Main script that runs the complete training, validation and test.
+Main script that runs the complete training, validation and test. The evaluation is performed in the JupyterNotebook.
 """
-
 import warnings
 import os
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+#os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:32'
 import comet_ml
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.loggers import CometLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-#from pytorch_lightning.callbacks import (
-#    ModelCheckpoint, LearningRateMonitor, EarlyStopping)
 
-#from icr import aux
-#from icr.constants import COMET_LOG_PATH, SPLITS
 from icr.constants import EOS, COMET_LOG_PATH
 from icr.config import config
 from icr.vocabulary import Vocabulary
 from icr.dataloader import CodrawData
 from icr.datamodel import CoDrawDataModule
-from icr.icrgenerator import ICRModel, ICRModel1, ICRModel2
+from icr.icrgenerator import ICRModel, ICRModel1, ICRModel2, ICRModelBart
 from icr.aux import write_model_outputs_to_files
 
 
@@ -30,12 +26,12 @@ print('\n---------- Running iCR experiment ----------\n')
 
 pl.seed_everything(config["training"]["random_seed"])
 torch.use_deterministic_algorithms(True, warn_only=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 vocab = Vocabulary(config["data"]["codraw_path"])
 dm = CoDrawDataModule(data_config=config["data"], batch_size=config["generation"]["batch_size"], vocabulary=vocab)
 
-model = ICRModel(vocab, config["model"])
-#model = model.to('cuda:0')
+model = ICRModel(vocab, config["model"]).to(device) #Bart
 
 print('\n---------- Initiliaze Trainer ----------\n')
 
@@ -70,9 +66,7 @@ model.eval()
 torch.no_grad()
 
 val_data = dm.val_dataloader()
-#output_file = "predictions.txt"
 target_file = "targets.txt"
-
 
 #can change based on vocabulary settings
 if os.path.isfile(config["paths"]["outputs_path"]+target_file) != True:
@@ -86,7 +80,6 @@ if os.path.isfile(config["paths"]["outputs_path"]+target_file) != True:
                         break
                 file.write(' '.join(x_target[1:-1]) + '\n')
 
-
 output_paths = {
     "reply": config["paths"]["outputs_path"]+"icr_predictions.txt",
     "outputs": config["paths"]["outputs_path"]+"out_predictions.txt",
@@ -95,16 +88,8 @@ output_paths = {
     "t": config["paths"]["outputs_path"]+"topic_predictions.txt",
     "m": config["paths"]["outputs_path"]+"mood_predictions.txt",
 }
-write_model_outputs_to_files(model, val_data, output_paths)
-                
-                
-                
-#with open(config["paths"]["outputs_path"]+output_file, "w") as file:
-#    for batch_idx, batch in enumerate(val_data):
-#        for d in batch["dialogue"]:
-#            dialogue = d.unsqueeze(0)
-#            predictions = model.reply(dialogue)[0]
-#            file.write(' '.join(predictions[:-1]) + '\n')
+
+write_model_outputs_to_files(model, val_data, output_paths, use_sampling=True, top_k=5, top_p=0.95, temperature = 1)  #, bart=True
 
 print("Outputs safed!\n")
 print("First 5 Outputs:\n")
@@ -112,15 +97,4 @@ print("First 5 Outputs:\n")
 with open(output_paths["reply"], "r") as file:
     lines = [line.strip() for line in file.readlines()]
     print(lines[0:5])
-
-
-
-
-
-
-
-
-
-
-
 

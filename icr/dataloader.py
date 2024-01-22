@@ -18,6 +18,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from transformers import BartTokenizer
+
 
 from icr.aux import (get_attributes, encode_classes, get_mentioned_cliparts, 
                      get_pose_face, get_question_mood, get_icr_topic,
@@ -57,7 +59,7 @@ class CodrawData(Dataset):
         codraw = self._load_codraw(codraw_path)
         self.icrs, self.question_moods, self.num_cliparts, self.topics = self._load_icrs(annotation_path, codraw)
         self.games, self.datapoints, = self._construct(codraw)
-        #self.scenes = self._load_raw_scenes(scenes_path)
+        self.scenes = self._load_raw_scenes(scenes_path)#
         self.instructions = self._load_texts(langmodel, "drawer-teller", token_embeddings_path)
         self.replies = self._load_texts(langmodel, "drawer", token_embeddings_path)
 
@@ -73,12 +75,12 @@ class CodrawData(Dataset):
 
         instruction_emb = self.get_embedding(game_id, turn, "instruction")
         drawer_reply_emb = self.get_embedding(game_id, turn, "drawer_reply")
-        teller_reply_tokenized, _, _ = self.get_tokens(game_id, turn, "teller")
-        drawer_reply_tokenized, in_seq, out_seq = self.get_tokens(game_id, turn, "drawer")
+        teller_reply_tokenized, teller_reply_tokenized_bart = self.get_tokens(game_id, turn, "teller")
+        drawer_reply_tokenized, drawer_reply_tokenized_bart = self.get_tokens(game_id, turn, "drawer")
         context = self.get_context(game_id, turn)
-        #scene_before, scene_after = self.get_scenes(game_id, turn)
-        #state_before, state_after = self.build_states(game_id, turn)
-        #actions = self.build_actions(state_before, state_after)
+        scene_before, scene_after = self.get_scenes(game_id, turn)#
+        #state_before, state_after = self.build_states(game_id, turn)#
+        #actions = self.build_actions(state_before, state_after)#
         icr_label = self.get_icr_turn_label(game_id, turn)
         icr_clip_label = self.get_icr_clipart_label(game_id, turn, cliplist)
         icr_mood = self.question_moods[game_id][turn][:]
@@ -93,15 +95,16 @@ class CodrawData(Dataset):
         data = {'dialogue': dialogue, 'game_id': game_id, 'identifier': idx,
                 'icr_label': icr_label, 'icr_clip_label': icr_clip_label,
                 'icr_topic': icr_topic, 'icr_mood': icr_mood, 'icr_num_clip': icr_num_clip,
-                #'scene_after': scene_after, 'scene_before': scene_before,
+                'scene_after': scene_after, 'scene_before': scene_before,#
                 'turn': turn, 'instruction_emb': instruction_emb, 
                 "drawer_reply_emb": drawer_reply_emb, 
                 "drawer_reply_tokenized": drawer_reply_tokenized,
                 "teller_reply_tokenized": teller_reply_tokenized,
-                "X": in_seq, "y": out_seq
+                "drawer_reply_tokenized_bart": drawer_reply_tokenized_bart, 
+                "teller_reply_tokenized_bart": teller_reply_tokenized_bart
                }
 
-        return {**data}#, **state_before, **state_after, **actions}
+        return {**data}#, **state_before, **state_after, **actions}#
 
     def _construct(self, codraw: Dict) -> Tuple[Dict, Dict]:
         """Build all datapoints according to specification."""
@@ -214,11 +217,11 @@ class CodrawData(Dataset):
         
         padded = torch.tensor(tokenized[:self.vocab.max_token] + [self.vocab.stoi[PAD]] * (self.vocab.max_token - len(tokenized)))
         
-        i = 1+int(random.random()*(len(tokenized)-1))
-        in_seq, out_seq = tokenized[:i], tokenized[i]
-        in_seq = torch.tensor(in_seq[:self.vocab.max_token] + [self.vocab.stoi[PAD]] * (self.vocab.max_token - len(in_seq)))
+        tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+        bart_token = tokenizer(utterance)["input_ids"]
+        bart_token = torch.tensor(bart_token[:self.vocab.max_token] + [tokenizer.pad_token_id] * (self.vocab.max_token - len(bart_token)))
 
-        return padded, in_seq, out_seq
+        return padded, bart_token
 
     def get_context(self, game_id: int, turn: int) -> Optional[Tensor]:
         """Return the context embedding."""

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import torch
-from pytorch_lightning.loggers import Logger
+#from pytorch_lightning.loggers import Logger
 from torch import Tensor
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -23,14 +23,13 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from icr import constants
 from icr.structs.dataconf import file2obj
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def write_model_outputs_to_files(model, val_data, output_paths):
+def write_model_outputs_to_files(model, val_data, output_paths, use_sampling, top_k, top_p, temperature, bart=False):
     """
-    Writes the outputs of the model to specified files.
-
-    :param model: The model used for generating replies.
-    :param val_data: Iterable DataLoader containing the validation data.
-    :param output_paths: Dictionary containing paths for each output file.
+    Writes the outputs of the model to specified files. Sampling parameters are defined and considered here for the inference 
+    process. There is a flag for models with a BART decoder, since it works with a specific tokenizer, 
+    which alters the tokenhandling slightly.
     """
     # Open all files at once
     with open(output_paths["reply"], "w") as file1, \
@@ -40,19 +39,21 @@ def write_model_outputs_to_files(model, val_data, output_paths):
          open(output_paths["t"], "w") as file5, \
          open(output_paths["m"], "w") as file6:
         
-        outputs = []
-        n = []
-        c = []
-        t = []
-        m = []
+        outputs, n, c, t, m = [], [], [], [], []
         
         for batch_idx, batch in enumerate(val_data):
-            for dialogue in batch["dialogue"]:
-                dialogue = dialogue.unsqueeze(0)
-                predictions = model.reply(dialogue)
-
-                # Assuming model.reply(dialogue) returns a tuple of five elements
-                file1.write(' '.join(predictions[0][:-1]) + '\n')
+            for dialogue, scene_before, scene_after in zip(batch["dialogue"], batch["scene_before"], batch["scene_after"]):
+                dialogue = dialogue.unsqueeze(0).to(device)
+                scene_before = scene_before.unsqueeze(0).to(device)
+                scene_after = scene_after.unsqueeze(0).to(device)
+                model.to(device)
+                
+                predictions = model.reply(dialogue, scene_before, scene_after, use_sampling, top_k, top_p, temperature)
+                
+                if bart:
+                    file1.write(predictions[0].replace("</s>","") + '\n')
+                else:
+                    file1.write(' '.join(predictions[0][:-1]) + '\n')
                 outputs.append(predictions[1].tolist())
                 n.append(predictions[2].tolist())
                 c.append(predictions[3].tolist())
@@ -65,8 +66,58 @@ def write_model_outputs_to_files(model, val_data, output_paths):
         json.dump(t, file5)
         json.dump(m, file6)
 
+'''
+def write_model_outputs_to_files(model, val_data, output_paths, use_sampling, top_k, top_p, temperature, bart=False):
+    """
+    Writes the outputs of the model to specified files. Sampling parameters are defined and considered here for the inference 
+    process. There is a flag for models with a BART decoder, since it works with a specific tokenizer, 
+    which alters the token handling slightly.
+    """
+    outputs, n, c, t, m = [], [], [], [], []
 
+    with open(output_paths["reply"], "w") as file1, \
+         open(output_paths["outputs"], "w") as file2, \
+         open(output_paths["n"], "w") as file3, \
+         open(output_paths["c"], "w") as file4, \
+         open(output_paths["t"], "w") as file5, \
+         open(output_paths["m"], "w") as file6:
 
+        for batch_idx, batch in enumerate(val_data):
+            dialogues = batch["dialogue"].to(device)
+            scenes_before = batch["scene_before"].to(device)
+            scenes_after = batch["scene_after"].to(device)
+
+            model.to(device)
+            with torch.no_grad():
+                predictions = model.reply(dialogues, scenes_before, scenes_after, use_sampling, top_k, top_p, temperature)
+
+            if bart:
+                file1.write(predictions[0].replace("</s>", "") + '\n')
+            else:
+                file1.write(' '.join(predictions[0][:-1]) + '\n')
+
+            outputs.append(predictions[1])
+            n.append(predictions[2])
+            c.append(predictions[3])
+            t.append(predictions[4])
+            m.append(predictions[5])
+
+        json.dump(outputs, file2)
+        json.dump(n, file3)
+        json.dump(c, file4)
+        json.dump(t, file5)
+        json.dump(m, file6)
+'''
+        
+def load_partial_state_dict(model, state_dict, prefix):
+    """Writes the saved model parameters into the new given model, which is just a subpart of the encoder-decoder architecture."""
+    own_state = model.state_dict()
+    for name, param in state_dict.items():
+        if name.startswith(prefix):
+            name = name[len(prefix):]  # Remove the prefix
+            own_state[name].copy_(param)
+
+            
 def filter_config(params: Namespace, keys: list) -> Namespace:
     """Filter the parameters by keys and return a Namespace with the subset."""
     subset = {key: value for key, value in vars(params).items() if key in keys}
@@ -83,16 +134,22 @@ def split_config(params: Namespace) -> List[Namespace]:
     return data_config, comet_config, train_config, model_config, exp_config
 
 
-def split_batch(batch): 
+def split_batch(batch, bart=False): 
     """Split batch data into inputs for the encoder"""
-    drawer_sequence = batch["drawer_reply_tokenized"][:, :-1]
-    targets =  batch["drawer_reply_tokenized"][:,1: ] 
+    if bart:
+        drawer_sequence = batch["drawer_reply_tokenized_bart"][:, :-1]
+        targets =  batch["drawer_reply_tokenized_bart"][:,1: ]
+    else:
+        drawer_sequence = batch["drawer_reply_tokenized"][:, :-1]
+        targets =  batch["drawer_reply_tokenized"][:,1: ]
     dialogue = batch["dialogue"]
     clip = batch["icr_clip_label"]
     mood = batch["icr_mood"]
     num_clip = batch["icr_num_clip"]
     topic = batch["icr_topic"]
-    return drawer_sequence, targets, dialogue, clip, mood, num_clip, topic
+    scene_before = batch["scene_before"]
+    scene_after = batch["scene_after"]
+    return drawer_sequence, targets, dialogue, scene_before, scene_after, clip, mood, num_clip, topic
 
 def compute_accuracy_text(outputs, targets, pad_idx):
     """Calculate accuracy for the predicted tokens matching the target, while ignoring the padding"""
@@ -112,6 +169,7 @@ def compute_accuracy_text(outputs, targets, pad_idx):
 
 
 def compute_accuracy_single_label(preds, y):
+    """Function to calculate the accuracy for a single label model."""
     preds = torch.argmax(preds, dim=1)
     correct = (preds == y).float()
     acc = correct.sum() / len(correct)
@@ -119,8 +177,8 @@ def compute_accuracy_single_label(preds, y):
 
 
 def compute_accuracy_multi_label(preds, y):
-    # Threshold predictions at 0.5
-    preds = preds > 0.5
+    """Function to calculate the accuracy for a multi label model."""
+    preds = preds > 0.5 # Threshold predictions at 0.5
     correct = (preds == y).float()
     acc = correct.sum() / (correct.numel())
     return acc
@@ -162,7 +220,7 @@ def check_params_consistency(params):
     if params.unfreeze_resnet or params.dont_preprocess_scenes:
         assert params.use_scene_before or params.use_scene_after
 
-
+'''
 def log_all(logger: Logger, params: Namespace, datasets: Dict[str, Dataset],
             clipmap: Dict[str, int], monitored_metric: str) -> Path:
     """Log all hyperparameters and metadata to comet and to local folder."""
@@ -216,8 +274,7 @@ def log_final_state(logger: Logger, log_dir: Path, ckpt_name: str) -> None:
     logger.experiment.log_other('best_epoch', epoch)
     logger.experiment.log_asset_folder(log_dir)
     logger.experiment.log_model('best-model.ckpt', ckpt_name)
-
-
+'''
 def encode_classes(column):
     """One hot encode a specific column in the annotation table"""
     column = column.fillna(column.name+"_nan")
@@ -243,7 +300,8 @@ def get_mentioned_cliparts(row: pd.Series) -> List[str]:
 
 def get_question_mood(row: pd.Series) -> List[str]:
     """Make list of one hot encoded mood in an iCR."""
-    return torch.Tensor([row.mood_nan, row.alternative_question, row.declarative, row.imperative, row.other, row.polar_question, row.wh_question])
+    return torch.Tensor([row.mood_nan, row.alternative_question, row.declarative, row.imperative, 
+                         row.other, row.polar_question, row.wh_question])
 
 
 def get_icr_topic(row: pd.Series) -> List[str]:

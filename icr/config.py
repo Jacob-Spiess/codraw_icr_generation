@@ -43,43 +43,43 @@ config = {
         "weight_decay": 0.0
     },
     "model": {
-        "actions_for_icr": 'none',
+        #"actions_for_icr": 'none',
         "d_model": 256,
         "dropout": 0.2,
         "full_trf_encoder": True,
-        "hidden_dim": 1024,
-        "hidden_dim_trf": 2048,
-        "dialogue_embedding_size": 1024,
+        "hidden_dim": 1024, #1024
+        "hidden_dim_trf": 1024,
+        "dialogue_embedding_size": 512, #1024
+        "scene_embedding_size": 512,
         "word_embedding_size": 512,
-        "decoder_size": 1024,
+        "decoder_size": 512,#1024
         "attention_size": 512,
         "topic_classes": 6,
         "num_clip_classes": 5,
         "mood_classes": 7,
         "clipart_classes": 28,
         "nheads": 16,
-        "nlayers": 3,
+        "nlayers": 6,#6#4
         "lr": 0.0001,
         "use_num_clip_decoder": True,
         "use_clipart_decoder": True,
         "use_topic_decoder": True,
         "use_mood_decoder": True,
-        "use_scene_before": True,
-        "use_scene_after": True,
-        "no_instruction": True,
-        "dont_make_actions": True,
-        "predict_icrs_turn": True,
-        "predict_icrs_clipart": True,
-        "random_baseline": True,
+        "use_scenes": True,
+        "use_instructions": True,
+        #"dont_make_actions": True,
+        #"predict_icrs_turn": True,
+        #"predict_icrs_clipart": True,
+        #"random_baseline": True,
         "dont_preprocess_scenes": True,
         "unfreeze_resnet": True
     },
     "training": {
         "n_grad_accumulate": 1,
         "clip": 1,
-        "device": 'cpu',   #['cpu', 'gpu']
+        "device": 'gpu',   #['cpu', 'gpu']
         "gpu": 1,
-        "n_epochs": 30,
+        "n_epochs": 40,
         "n_reload_data": 1,
         "random_seed": 1234
     }
