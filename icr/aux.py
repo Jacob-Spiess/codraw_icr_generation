@@ -25,19 +25,24 @@ from icr.structs.dataconf import file2obj
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def write_model_outputs_to_files(model, val_data, output_paths, use_sampling, top_k, top_p, temperature, bart=False):
+
+def write_model_outputs_to_files(model, val_data, output_paths, use_sampling, top_k, top_p, temperature, 
+                                 bart=False, write_additional_outputs=False):
     """
     Writes the outputs of the model to specified files. Sampling parameters are defined and considered here for the inference 
-    process. There is a flag for models with a BART decoder, since it works with a specific tokenizer, 
-    which alters the tokenhandling slightly.
+    process. There is a flag for models with a BART decoder, and a flag to control the writing of additional outputs (n, c, t, m).
     """
-    # Open all files at once
+    # Open the necessary files
     with open(output_paths["reply"], "w") as file1, \
-         open(output_paths["outputs"], "w") as file2, \
-         open(output_paths["n"], "w") as file3, \
-         open(output_paths["c"], "w") as file4, \
-         open(output_paths["t"], "w") as file5, \
-         open(output_paths["m"], "w") as file6:
+         open(output_paths["outputs"], "w") as file2:
+
+        # Conditionally open files for n, c, t, m if the flag is set
+        if write_additional_outputs:
+            additional_files = open(output_paths["n"], "w"), open(output_paths["c"], "w"), \
+                               open(output_paths["t"], "w"), open(output_paths["m"], "w")
+            file3, file4, file5, file6 = additional_files
+        else:
+            additional_files = None
         
         outputs, n, c, t, m = [], [], [], [], []
         
@@ -51,63 +56,28 @@ def write_model_outputs_to_files(model, val_data, output_paths, use_sampling, to
                 predictions = model.reply(dialogue, scene_before, scene_after, use_sampling, top_k, top_p, temperature)
                 
                 if bart:
-                    file1.write(predictions[0].replace("</s>","") + '\n')
+                    file1.write(predictions[0].replace("</s>", "") + '\n')
                 else:
                     file1.write(' '.join(predictions[0][:-1]) + '\n')
                 outputs.append(predictions[1].tolist())
-                n.append(predictions[2].tolist())
-                c.append(predictions[3].tolist())
-                t.append(predictions[4].tolist())
-                m.append(predictions[5].tolist())
+                
+                if write_additional_outputs:
+                    n.append(predictions[2].tolist())
+                    c.append(predictions[3].tolist())
+                    t.append(predictions[4].tolist())
+                    m.append(predictions[5].tolist())
 
         json.dump(outputs, file2)
-        json.dump(n, file3)
-        json.dump(c, file4)
-        json.dump(t, file5)
-        json.dump(m, file6)
 
-'''
-def write_model_outputs_to_files(model, val_data, output_paths, use_sampling, top_k, top_p, temperature, bart=False):
-    """
-    Writes the outputs of the model to specified files. Sampling parameters are defined and considered here for the inference 
-    process. There is a flag for models with a BART decoder, since it works with a specific tokenizer, 
-    which alters the token handling slightly.
-    """
-    outputs, n, c, t, m = [], [], [], [], []
-
-    with open(output_paths["reply"], "w") as file1, \
-         open(output_paths["outputs"], "w") as file2, \
-         open(output_paths["n"], "w") as file3, \
-         open(output_paths["c"], "w") as file4, \
-         open(output_paths["t"], "w") as file5, \
-         open(output_paths["m"], "w") as file6:
-
-        for batch_idx, batch in enumerate(val_data):
-            dialogues = batch["dialogue"].to(device)
-            scenes_before = batch["scene_before"].to(device)
-            scenes_after = batch["scene_after"].to(device)
-
-            model.to(device)
-            with torch.no_grad():
-                predictions = model.reply(dialogues, scenes_before, scenes_after, use_sampling, top_k, top_p, temperature)
-
-            if bart:
-                file1.write(predictions[0].replace("</s>", "") + '\n')
-            else:
-                file1.write(' '.join(predictions[0][:-1]) + '\n')
-
-            outputs.append(predictions[1])
-            n.append(predictions[2])
-            c.append(predictions[3])
-            t.append(predictions[4])
-            m.append(predictions[5])
-
-        json.dump(outputs, file2)
-        json.dump(n, file3)
-        json.dump(c, file4)
-        json.dump(t, file5)
-        json.dump(m, file6)
-'''
+        # Conditionally write to additional files
+        if write_additional_outputs:
+            json.dump(n, file3)
+            json.dump(c, file4)
+            json.dump(t, file5)
+            json.dump(m, file6)
+            # Close additional files
+            for f in additional_files:
+                f.close()
         
 def load_partial_state_dict(model, state_dict, prefix):
     """Writes the saved model parameters into the new given model, which is just a subpart of the encoder-decoder architecture."""
@@ -220,61 +190,7 @@ def check_params_consistency(params):
     if params.unfreeze_resnet or params.dont_preprocess_scenes:
         assert params.use_scene_before or params.use_scene_after
 
-'''
-def log_all(logger: Logger, params: Namespace, datasets: Dict[str, Dataset],
-            clipmap: Dict[str, int], monitored_metric: str) -> Path:
-    """Log all hyperparameters and metadata to comet and to local folder."""
-
-    # create directory where experiment results and metadata will be saved
-    path_name = Path(f'{params.outputs_path}{logger.version}')
-    os.mkdir(path_name)
-
-    # log all to comet
-    params_dic = {k: v for k, v in vars(params).items() if '_key' not in k}
-    logger.experiment.log_parameters(params_dic)
-    logger.experiment.log_code('main.py')
-    logger.experiment.log_code(folder='icr/')
-    logger.experiment.log_others(datasets['train'].stats)
-    logger.experiment.log_others(datasets['val'].stats)
-    logger.experiment.log_others(datasets['test'].stats)
-    logger.experiment.log_other('monitored', monitored_metric)
-    if params.comet_tag:
-        logger.experiment.add_tag(params.comet_tag)
-
-    # also log hyperparameter configuration and metadata to local
-    for split in constants.SPLITS:
-        with open(path_name / f'{split}_stats.json', 'w') as file:
-            json.dump(datasets['train'].stats, file)
-
-    with open(path_name / 'config.json', 'w') as file:
-        json.dump(params_dic, file)
-
-    with open(path_name / 'clipmap.json', 'w') as file:
-        json.dump(clipmap, file)
-
-    with open(path_name / 'meta.txt', 'w') as file:
-        file.write(f'Comet name: {logger.experiment.get_name()}\n')
-        file.write(f'Monitored: {monitored_metric}\n')
-        file.write(f'Tag: {params.comet_tag}')
-
-    datasets['val'].save_structure(path_name)
-    datasets['test'].save_structure(path_name)
-    print('\n')
-    return path_name
-
-
-def log_final_state(logger: Logger, log_dir: Path, ckpt_name: str) -> None:
-    """Log the best epoch to the the local directory."""
-    begin = re.search('epoch=', ckpt_name).span()[1]
-    end = re.search('.ckpt', ckpt_name).span()[0]
-    epoch = int(ckpt_name[begin: end])
-
-    with open(log_dir / 'meta.txt', 'a') as file:
-        file.write(f'Best epoch: {epoch}')
-    logger.experiment.log_other('best_epoch', epoch)
-    logger.experiment.log_asset_folder(log_dir)
-    logger.experiment.log_model('best-model.ckpt', ckpt_name)
-'''
+        
 def encode_classes(column):
     """One hot encode a specific column in the annotation table"""
     column = column.fillna(column.name+"_nan")
@@ -358,16 +274,6 @@ def is_thing(clipart: str) -> bool:
     """Return True if clipart is a thing (i.e. not a person)."""
     return 'boy' not in clipart and 'girl' not in clipart
 
-
-def define_monitored_metric(params: Namespace) -> Tuple[str, str]:
-    """Return name of metric and mode (min/max) monitored for checkpointing."""
-    if params.predict_icrs_turn:
-        return 'val_icr_label_BinaryAveragePrecision', 'max'
-    if params.predict_icrs_clipart:
-        return 'val_icr_clip_label_BinaryAveragePrecision', 'max'
-    if not params.dont_make_actions:
-        return 'val_action_BinaryAveragePrecision', 'max'
-    return 'val_loss', 'min'
 
 
 def percent(numerator: float, denominator: float) -> float:

@@ -6,7 +6,6 @@ Main script that runs the complete training, validation and test. The evaluation
 import warnings
 import os
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-#os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:32'
 import comet_ml
 import pytorch_lightning as pl
 import torch
@@ -18,7 +17,7 @@ from icr.config import config
 from icr.vocabulary import Vocabulary
 from icr.dataloader import CodrawData
 from icr.datamodel import CoDrawDataModule
-from icr.icrgenerator import ICRModel, ICRModel1, ICRModel2, ICRModelBart
+from icr.icrgenerator import ICRModel, ICRModelBart, ICRModel1, ICRModelpretrained, ICRModel2
 from icr.aux import write_model_outputs_to_files
 
 
@@ -31,7 +30,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 vocab = Vocabulary(config["data"]["codraw_path"])
 dm = CoDrawDataModule(data_config=config["data"], batch_size=config["generation"]["batch_size"], vocabulary=vocab)
 
-model = ICRModel(vocab, config["model"]).to(device) #Bart
+model = ICRModel(vocab, config["model"]).to(device)
+
+num_clip_decoder_state = './savedsubmodels/NModel.pth'
+clip_decoder_state = './savedsubmodels/CModel.pth'
+topic_decoder_state = './savedsubmodels/TModel.pth'
+mood_decoder_state = './savedsubmodels/MModel.pth'
+
+#model = ICRModelpretrained(vocab, config["model"], 
+#                           num_clip_decoder_state=num_clip_decoder_state, clip_decoder_state=clip_decoder_state, 
+#                           topic_decoder_state=topic_decoder_state, mood_decoder_state=mood_decoder_state).to(device)
 
 print('\n---------- Initiliaze Trainer ----------\n')
 

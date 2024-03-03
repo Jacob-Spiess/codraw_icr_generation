@@ -14,6 +14,7 @@ from torchmetrics.text import BLEUScore
 from torchmetrics.text.rouge import ROUGEScore
 from aac_metrics.classes.cider_d import CIDErD
 from nltk.translate.meteor_score import single_meteor_score
+from nltk.translate.bleu_score import sentence_bleu
 
 from icr.aux import list_avg
 
@@ -41,18 +42,23 @@ class ChrfScore(nn.Module):
     def forward(self, refs, hyps):
         scores= self.chrf_scorer(hyps, refs)
         return round(scores[0].item(), self.digits), scores[1].tolist()
-    
+
 class BleuScore(nn.Module):
     def __init__(self, weights, digits = 4):
         super(BleuScore, self).__init__()
         self.digits = digits
-        with torch.no_grad():
-            self.bleu_scorer = BLEUScore(weights=weights)
+        self.weights = weights
             
     def forward(self, refs, hyps):
-        refs = [[item] for item in refs]
-        scores= self.bleu_scorer(hyps, refs)
-        return round(scores.item(), self.digits), 0
+        bleu_scores = []
+        for hypothesis, reference in zip(hyps, refs):
+            hypothesis_tokens = nltk.word_tokenize(hypothesis)
+            reference_tokens = [nltk.word_tokenize(reference)]
+
+            score = sentence_bleu(reference_tokens, hypothesis_tokens, weights=self.weights)
+            bleu_scores.append(score)
+        average_bleu_score = sum(bleu_scores) / len(bleu_scores)
+        return round(average_bleu_score, self.digits), bleu_scores
     
 class RogueScore(nn.Module):
     def __init__(self, metric = "rouge1_fmeasure", digits = 4):
@@ -139,31 +145,31 @@ class DistinctScore(nn.Module):
 
     
 SCORER_NAME_TO_CLASS = {
-    "bertscore": BertScore(),
-    "chrfscore": ChrfScore(),
-    "bleuscore1": BleuScore((1, 0, 0, 0)),
-    "bleuscore2": BleuScore((0.5, 0.5, 0, 0)),
-    "bleuscore3": BleuScore((0.33, 0.33, 0.33, 0)),
-    "bleuscore4": BleuScore((0.25, 0.25, 0.25, 0.25)),
-    "rogue1score": RogueScore("rouge1_fmeasure"),
-    "ciderscore": CiderScore(),
-    "meteorscore": MeteorScore(),
-    "distinct-1score": DistinctScore(n = 1),
-    "distinct-2score": DistinctScore(n = 2)
+    "BERT Score": BertScore(),
+    "ChrF Score": ChrfScore(),
+    "BLEU Score1": BleuScore((1, 0, 0, 0)),
+    "BLEU Score2": BleuScore((0.5, 0.5, 0, 0)),
+    "BLEU Score3": BleuScore((0.33, 0.33, 0.33, 0)),
+    "BLEU Score4": BleuScore((0.25, 0.25, 0.25, 0.25)),
+    "ROUGE Score F1": RogueScore("rouge1_fmeasure"),
+    "CIDEr Score": CiderScore(),
+    "METEOR Score": MeteorScore(),
+    "Distinct-1 Score": DistinctScore(n = 1),
+    "Distinct-2 Score": DistinctScore(n = 2)
 }
 
 
 class GenerationEvaluator:
-    def __init__(self, scorers=['bertscore', "chrfscore","bleuscore1", "bleuscore2", "bleuscore3", "bleuscore4", "rogue1score",
-                               "ciderscore", "meteorscore", "distinct-1score", "distinct-2score"]):
+    def __init__(self, scorers=['BERT Score', "ChrF Score", "BLEU Score1", "BLEU Score2", "BLEU Score3", "BLEU Score4", "ROUGE Score F1",
+                               "CIDEr Score", "METEOR Score", "Distinct-1 Score", "Distinct-2 Score"]):
         self.scorers = {}
 
         for scorer_name in scorers:
-            if scorer_name.lower() in SCORER_NAME_TO_CLASS:
-                if scorer_name in SCORER_NAME_TO_CLASS: 
-                    self.scorers[scorer_name] = SCORER_NAME_TO_CLASS[scorer_name]  
-                else:
-                    raise NotImplementedError(f'scorer of type {scorer_name} not implemented')
+            #if scorer_name.lower() in SCORER_NAME_TO_CLASS:
+            if scorer_name in SCORER_NAME_TO_CLASS: 
+                self.scorers[scorer_name] = SCORER_NAME_TO_CLASS[scorer_name]  
+            else:
+                raise NotImplementedError(f'scorer of type {scorer_name} not implemented')
 
     def evaluate(self, hypotheses, references):
         assert len(hypotheses) == len(references), f'Length of hypotheses (i.e. generations) {len(hypotheses)} and references (i.e. ground truths) {len(references)} must match. '

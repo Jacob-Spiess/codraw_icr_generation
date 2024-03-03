@@ -30,7 +30,7 @@ The directory ```env/``` contains the files that can be used to recreate the con
 conda env create -f conda-environment.yml 
 ```
 
-is currently the most consistent way to set up a conda environment, which enables the execution of the code. Note that not the most recent versions of PyTorch due to the cuda version available in the development environment. If possible, feel free to update all used libraries and packages to the latest versions, we currently don't see any reason why the code shouldn't run, after possible minor adjustments to the environment.
+is currently the most consistent way to set up a conda environment, which enables the execution of the code. Note that not the most recent versions of PyTorch due to the cuda version available in the development environment. 
 
 Another option is running
 

@@ -7,7 +7,8 @@ checkpoints/
 codrawmodels/
 lightning_logs/
 comet-logs/
-*.ipynb
+savedsubmodels/
+*.pht
 *.ckpt
 
 docs.md

@@ -10,13 +10,7 @@ import comet_ml
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
-#from torch.utils.data import DataLoader, Dataset
-#from pytorch_lightning.loggers import CometLogger
-#from pytorch_lightning.callbacks import (
-#    ModelCheckpoint, LearningRateMonitor, EarlyStopping)
 
-#from icr import aux
-#from icr.constants import COMET_LOG_PATH, SPLITS
 from icr.constants import EOS
 from icr.config import config
 from icr.vocabulary import Vocabulary
@@ -39,15 +33,14 @@ dm = CoDrawDataModule(data_config=config["data"], batch_size=config["generation"
 #'comet-logs/codraw-icr-generation/7cc309e780ac4149bd6a514a231f0e2a/checkpoints/epoch=18-step=4161.ckpt' #best Transformer
 #'comet-logs/codraw-icr-generation/a8fbfbb69dbe47efb065d6e01445572b/checkpoints/epoch=39-step=8760.ckpt' #best LSTM secret_cougar_1115
 #'comet-logs/codraw-icr-generation/468af100307a488bb9193aed3d1f1896/checkpoints/epoch=14-step=3285.ckpt' #best Attention diverse_stable_1301
-CKPT_PATH = 'comet-logs/codraw-icr-generation/969472473b404df49daa89be78ed0106/checkpoints/epoch=9-step=2190.ckpt'
+#'comet-logs/codraw-icr-generation/4e2691240c9648cd876104d0e83c6c87/checkpoints/epoch=39-step=8760.ckpt' #Baseline LSTM no classifiers
+CKPT_PATH = 'comet-logs/codraw-icr-generation/780a640516744ded8c7c6cd4ce3269c3/checkpoints/epoch=39-step=8760.ckpt'
+#CKPT_PATH = 'comet-logs/codraw-icr-generation/969472473b404df49daa89be78ed0106/checkpoints/epoch=9-step=2190.ckpt'
 #CKPT_PATH = 'outputs/lightning_logs/version_85/checkpoints/epoch=3-step=657.ckpt'
 #CKPT_PATH = './outputs/lightning_logs/version_16/checkpoints/epoch=15-step=3504.ckpt'
 
-model = ICRModel1.load_from_checkpoint(CKPT_PATH)
+model = ICRModel.load_from_checkpoint(CKPT_PATH)
 model.to(device)
-
-#print(model.learning_rate)
-# prints the learning_rate you used in this checkpoint
 
 model.eval()
 
@@ -76,7 +69,6 @@ torch.no_grad()
 val_data = dm.val_dataloader()
 
 target_file = "targets.txt"
-
 #can change based on vocabulary settings
 if os.path.isfile(config["paths"]["outputs_path"]+target_file) != True:
     with open(config["paths"]["outputs_path"]+target_file, "w") as file:
@@ -98,7 +90,8 @@ output_paths = {
     "m": config["paths"]["outputs_path"]+"mood_predictions.txt",
 }
 
-write_model_outputs_to_files(model, val_data, output_paths, use_sampling=False, top_k=5, top_p=0.95, temperature = 1)
+write_model_outputs_to_files(model, val_data, output_paths, use_sampling=True, top_k=50, top_p=0.60, temperature = 2, 
+                             write_additional_outputs=False)
 
 print("Outputs safed!\n")
 print("First 5 Outputs:\n")

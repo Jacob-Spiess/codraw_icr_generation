@@ -28,3 +28,5 @@ pip install six
 pip install -U 'jsonschema<4.0'
 python -m pip install psutil
 pip install pytorch-lightning
+conda install protobuf
+pip install absl-py

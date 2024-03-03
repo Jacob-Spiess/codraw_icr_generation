@@ -19,6 +19,7 @@ config = {
     },
     "data": {
         "annotation_path": "../data/codraw-icr-v2.tsv",
+        "bart_path": "../data/bart.json",
         "codraw_path": "../data/CoDraw-master/dataset/CoDraw_1_0.json",
         "token_embeddings_path": "../data/text_embeddings/",
         "scenes_path": "../data/preprocessed/images/raw/",
@@ -43,34 +44,29 @@ config = {
         "weight_decay": 0.0
     },
     "model": {
-        #"actions_for_icr": 'none',
         "d_model": 256,
-        "dropout": 0.2,
+        "dropout": 0.1,
         "full_trf_encoder": True,
-        "hidden_dim": 1024, #1024
+        "hidden_dim": 1024, 
         "hidden_dim_trf": 1024,
-        "dialogue_embedding_size": 512, #1024
+        "dialogue_embedding_size": 512,
         "scene_embedding_size": 512,
         "word_embedding_size": 512,
-        "decoder_size": 512,#1024
+        "decoder_size": 512,
         "attention_size": 512,
         "topic_classes": 6,
         "num_clip_classes": 5,
         "mood_classes": 7,
         "clipart_classes": 28,
         "nheads": 16,
-        "nlayers": 6,#6#4
-        "lr": 0.0001,
+        "nlayers": 6,
+        "lr": 0.0003,
         "use_num_clip_decoder": True,
         "use_clipart_decoder": True,
         "use_topic_decoder": True,
         "use_mood_decoder": True,
-        "use_scenes": True,
+        "use_scenes": True, 
         "use_instructions": True,
-        #"dont_make_actions": True,
-        #"predict_icrs_turn": True,
-        #"predict_icrs_clipart": True,
-        #"random_baseline": True,
         "dont_preprocess_scenes": True,
         "unfreeze_resnet": True
     },
@@ -81,6 +77,6 @@ config = {
         "gpu": 1,
         "n_epochs": 40,
         "n_reload_data": 1,
-        "random_seed": 1234
+        "random_seed": 13
     }
 }

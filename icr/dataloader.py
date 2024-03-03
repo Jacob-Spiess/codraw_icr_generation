@@ -36,7 +36,7 @@ from icr.structs.game import Game
 class CodrawData(Dataset):
     """Build the CoDraw datapoints for one split."""
     def __init__(self, split: str, clipmap: Dict[str, int], vocabulary, 
-                 annotation_path: str, codraw_path: str,
+                 annotation_path: str, bart_path: str, codraw_path: str,
                  token_embeddings_path: str, scenes_path: str,
                  context_size: int, dont_merge_persons: bool,
                  dont_separate_actions: bool, langmodel: str,
@@ -57,7 +57,8 @@ class CodrawData(Dataset):
         self.vocab = vocabulary
 
         codraw = self._load_codraw(codraw_path)
-        self.icrs, self.question_moods, self.num_cliparts, self.topics = self._load_icrs(annotation_path, codraw)
+        self.icrs, self.question_moods, self.num_cliparts, self.topics, self.bart_token = self._load_icrs(annotation_path, bart_path,
+                                                                                                          codraw)
         self.games, self.datapoints, = self._construct(codraw)
         self.scenes = self._load_raw_scenes(scenes_path)#
         self.instructions = self._load_texts(langmodel, "drawer-teller", token_embeddings_path)
@@ -86,6 +87,7 @@ class CodrawData(Dataset):
         icr_mood = self.question_moods[game_id][turn][:]
         icr_num_clip = self.num_cliparts[game_id][turn][:]
         icr_topic = self.topics[game_id][turn][:]
+        bart_token = self.bart_token[game_id][turn][:]
 
         # append context to the last instruction
         dialogue = instruction_emb
@@ -100,8 +102,9 @@ class CodrawData(Dataset):
                 "drawer_reply_emb": drawer_reply_emb, 
                 "drawer_reply_tokenized": drawer_reply_tokenized,
                 "teller_reply_tokenized": teller_reply_tokenized,
-                "drawer_reply_tokenized_bart": drawer_reply_tokenized_bart, 
-                "teller_reply_tokenized_bart": teller_reply_tokenized_bart
+                "drawer_reply_tokenized_bart": bart_token#,
+                #"drawer_reply_tokenized_bart": drawer_reply_tokenized_bart, 
+                #"teller_reply_tokenized_bart": teller_reply_tokenized_bart
                }
 
         return {**data}#, **state_before, **state_after, **actions}#
@@ -143,18 +146,20 @@ class CodrawData(Dataset):
             return True
         return False
 
-    def _load_icrs(self, path: str, codraw: Dict) -> Dict[int, Dict]:
+    def _load_icrs(self, path: str, bart_path: str, codraw: Dict) -> Dict[int, Dict]:
         """Load annotation and return dictionary of iCR turns and cliparts."""
         annot = pd.read_csv(Path(path), sep='\t')
         annot.columns = [col.replace('size', 'size_') for col in annot.columns] #to access the column by name
         annot_clipart = encode_classes(annot['clipart'])
-        annot_mood= encode_classes(annot['mood'])
-        annot = pd.concat([annot, annot_clipart, annot_mood], axis=1)
+        annot_mood = encode_classes(annot['mood'])
+        bart = pd.read_json(Path(bart_path), orient='split')
+        annot = pd.concat([annot, annot_clipart, annot_mood, bart["bart"]], axis=1)
 
         icr_cliparts = {name: {} for name in codraw}
         question_moods = {name: {} for name in codraw}
         num_cliparts = {name: {} for name in codraw}
         topics = {name: {} for name in codraw}
+        bart_token = {name: {} for name in codraw}
         for _, row in annot.iterrows():
             if self.split not in row.game_name:
                 continue
@@ -163,7 +168,8 @@ class CodrawData(Dataset):
             question_moods[game_id][row.turn] = get_question_mood(row)
             num_cliparts[game_id][row.turn] = get_number_cliparts(row)
             topics[game_id][row.turn] = get_icr_topic(row)
-        return icr_cliparts, question_moods, num_cliparts, topics
+            bart_token[game_id][row.turn] = torch.tensor(row.bart)
+        return icr_cliparts, question_moods, num_cliparts, topics, bart_token
 
     def _load_codraw(self, path: str) -> Dict[int, Dict]:
         """Read CoDraw JSON file and return dictionary with the split games."""
@@ -217,11 +223,11 @@ class CodrawData(Dataset):
         
         padded = torch.tensor(tokenized[:self.vocab.max_token] + [self.vocab.stoi[PAD]] * (self.vocab.max_token - len(tokenized)))
         
-        tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
-        bart_token = tokenizer(utterance)["input_ids"]
-        bart_token = torch.tensor(bart_token[:self.vocab.max_token] + [tokenizer.pad_token_id] * (self.vocab.max_token - len(bart_token)))
+        #tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+        #bart_token = tokenizer(utterance)["input_ids"]
+        #bart_token = torch.tensor(bart_token[:self.vocab.max_token] + [tokenizer.pad_token_id] * (self.vocab.max_token - len(bart_token)))
 
-        return padded, bart_token
+        return padded, padded#bart_token
 
     def get_context(self, game_id: int, turn: int) -> Optional[Tensor]:
         """Return the context embedding."""
